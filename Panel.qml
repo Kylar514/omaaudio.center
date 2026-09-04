@@ -164,6 +164,7 @@ Panel {
   property string focusSection: "output"
   property int selectedIndex: -1
   property bool cursorActive: false
+  property bool awaitingSecondG: false
 
   // "header" is a virtual section for the hero output mute toggle; it sits
   // above the output section so the speaker can be muted from the keyboard.
@@ -248,6 +249,50 @@ Panel {
     }
   }
 
+  function cancelVimPrefix() {
+    awaitingSecondG = false
+    vimPrefixTimer.stop()
+  }
+
+  function moveCursorToStart() {
+    cancelVimPrefix()
+    focusSection = "header"
+    selectedIndex = -1
+    cursorActive = true
+    resetScroll()
+  }
+
+  function moveCursorToEnd() {
+    cancelVimPrefix()
+    var sections = visibleSections
+    if (!sections || sections.length === 0) {
+      moveCursorToStart()
+      return
+    }
+    focusSection = sections[sections.length - 1]
+    var count = sectionCount(focusSection)
+    selectedIndex = count > 0 ? count - 1 : (sectionHasSlider(focusSection) ? -1 : 0)
+    cursorActive = true
+  }
+
+  function handleVimBoundaryMotion(text) {
+    if (text === "G") {
+      moveCursorToEnd()
+      return true
+    }
+    if (text !== "g") {
+      cancelVimPrefix()
+      return false
+    }
+    if (awaitingSecondG) {
+      moveCursorToStart()
+    } else {
+      awaitingSecondG = true
+      vimPrefixTimer.restart()
+    }
+    return true
+  }
+
   function setHeaderCursor() {
     cursorActive = true
     focusSection = "header"
@@ -323,6 +368,7 @@ Panel {
   }
 
   onOpenedChanged: {
+    cancelVimPrefix()
     if (opened) {
       refreshDisplayAudioModels()
       focusSection = "output"
@@ -332,6 +378,12 @@ Panel {
     } else {
       clearDisplayAudioModels()
     }
+  }
+
+  Timer {
+    id: vimPrefixTimer
+    interval: 1000
+    onTriggered: root.awaitingSecondG = false
   }
 
   // Clamp / repair the cursor whenever any list refreshes underneath us.
@@ -682,6 +734,7 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       onMoveRequested: function(dx, dy) {
+        root.cancelVimPrefix()
         if (!root.cursorActive) { root.cursorActive = true; return }
         if (dy !== 0) root.moveCursor(dy)
         else if (dx !== 0) root.adjustVolume(dx * 0.05)
@@ -690,6 +743,7 @@ Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
+        if (root.handleVimBoundaryMotion(t)) return
         if (t.length === 1 && t >= "0" && t <= "9") {
           if (root.cursorActive) root.setSelectedVolume(t === "0" ? 1 : Number(t) / 10)
         } else if (t === "q" || t === "Q") {

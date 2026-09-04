@@ -1,8 +1,9 @@
 # Centered Audio
 
 Omarchy's audio bar widget with its popup centered on the active display.
-It also keeps the local keyboard controls: `q` closes the panel and number
-keys set the focused volume control directly.
+It also keeps the local keyboard controls: `q` closes the panel, `gg` and `G`
+jump to the first and last selectable rows, and number keys set the focused
+volume control directly.
 
 ## Install
 
