@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "omarchy.audio",
-  "name": "Audio",
+  "id": "omaaudio.center",
+  "name": "Centered Audio",
   "version": "1.0.0",
-  "author": "Omarchy",
-  "description": "Volume slider, output picker, per-app mixer",
+  "author": "Kylar514",
+  "license": "MIT",
+  "description": "Omarchy audio controls in a screen-centered popup",
   "kinds": [
     "bar-widget"
   ],
@@ -12,9 +13,12 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Audio",
-    "description": "Volume slider, output picker, per-app mixer",
+    "displayName": "Centered Audio",
+    "description": "Omarchy audio controls in a screen-centered popup",
     "category": "Audio",
     "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.audio"
   }
 }

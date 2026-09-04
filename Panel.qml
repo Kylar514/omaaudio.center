@@ -286,6 +286,21 @@ Panel {
     }
   }
 
+  function setSelectedVolume(volume) {
+    if (focusSection === "output" && selectedIndex === -1) {
+      setOutputVolume(volume)
+      return
+    }
+    if (focusSection === "input" && selectedIndex === -1) {
+      setInputVolume(volume)
+      return
+    }
+    if (focusSection === "streams" && selectedIndex >= 0 && selectedIndex < displayAudioStreams.length) {
+      var stream = displayAudioStreams[selectedIndex]
+      if (stream && stream.audio) stream.audio.volume = volume
+    }
+  }
+
   // Enter/Space: activate whatever the cursor is on.
   function activateCursor() {
     if (focusSection === "header") { toggleAllMuted(); return }
@@ -654,8 +669,14 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
+    centerOnBar: true
     contentWidth: panel.fittedContentWidth(Style.space(380))
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(560))
+    readonly property int centeredContentHeight: Math.round(Math.min(
+      panelColumn.implicitHeight + panel.verticalContentInset,
+      Style.space(560),
+      Math.max(panel.verticalContentInset, panel.screenH - Math.max(panel.margin * 2, panel.barH * 2))))
+    contentHeight: centeredContentHeight
+    gap: Math.max(0, Math.round((panel.screenH - panel.contentHeight) / 2 - panel.barH))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -669,9 +690,13 @@ Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
+        if (t.length === 1 && t >= "0" && t <= "9") {
+          if (root.cursorActive) root.setSelectedVolume(t === "0" ? 1 : Number(t) / 10)
+        } else if (t === "q" || t === "Q") {
+          root.close()
         // 'm' mutes whatever the cursor is on: focused section's slider
         // for output/input, the focused stream for streams.
-        if (t === "m" || t === "M") {
+        } else if (t === "m" || t === "M") {
           if (!root.cursorActive) return
           if (root.focusSection === "streams" && root.selectedIndex >= 0
               && root.selectedIndex < root.displayAudioStreams.length) {

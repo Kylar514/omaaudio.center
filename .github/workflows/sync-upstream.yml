@@ -1,0 +1,44 @@
+name: Sync Omarchy Upstream
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: master
+      - name: Update upstream branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source_path="shell/plugins/panels/audio"
+          git fetch --no-tags https://github.com/omacom/omarchy.git quattro
+          omarchy_sha=$(git rev-parse FETCH_HEAD)
+          git fetch origin upstream:refs/remotes/origin/upstream
+          worktree=$(mktemp -d)
+          trap 'git worktree remove --force "$worktree"' EXIT
+          git worktree add --detach "$worktree" origin/upstream
+          git -C "$worktree" rm -r --ignore-unmatch -- .
+          git archive "$omarchy_sha:$source_path" | tar -x -C "$worktree"
+          if git -C "$worktree" diff --quiet && git -C "$worktree" diff --cached --quiet; then
+            exit 0
+          fi
+          git -C "$worktree" add -A
+          git -C "$worktree" -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            commit -m "Sync Omarchy audio plugin at ${omarchy_sha:0:7}"
+          git -C "$worktree" push origin HEAD:upstream
+          if ! gh pr list --base master --head upstream --state open --json number --jq 'length > 0' | grep -qx true; then
+            gh pr create --base master --head upstream --title "Sync Omarchy audio plugin" \
+              --body "Updates the upstream mirror from omacom/omarchy@${omarchy_sha}. Resolve any conflicts while preserving the centered popup behavior."
+          fi

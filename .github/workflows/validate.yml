@@ -1,0 +1,21 @@
+name: Validate
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Validate plugin manifest
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch quattro https://github.com/omacom/omarchy.git /tmp/omarchy
+          bash /tmp/omarchy/bin/omarchy-plugin-validate "$GITHUB_WORKSPACE"
