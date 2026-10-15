@@ -326,8 +326,8 @@ Panel {
       return
     }
     if (focusSection === "streams" && selectedIndex >= 0 && selectedIndex < displayAudioStreams.length) {
-      var s = displayAudioStreams[selectedIndex]
-      if (s && s.audio) s.audio.volume = Math.max(0, Math.min(1.5, s.audio.volume + delta))
+      var g = displayAudioStreams[selectedIndex]
+      setGroupVolume(g, Math.max(0, Math.min(1.5, groupVolume(g) + delta)))
     }
   }
 
@@ -341,9 +341,33 @@ Panel {
       return
     }
     if (focusSection === "streams" && selectedIndex >= 0 && selectedIndex < displayAudioStreams.length) {
-      var stream = displayAudioStreams[selectedIndex]
-      if (stream && stream.audio) stream.audio.volume = volume
+      setGroupVolume(displayAudioStreams[selectedIndex], volume)
     }
+  }
+
+  // A stream row is a group of nodes from one process; these act on all of them.
+  function groupVolume(g) {
+    var v = 0
+    for (var i = 0; g && i < g.nodes.length; i++)
+      if (g.nodes[i].audio) v = Math.max(v, g.nodes[i].audio.volume)
+    return v
+  }
+
+  function groupMuted(g) {
+    for (var i = 0; g && i < g.nodes.length; i++)
+      if (g.nodes[i].audio && !g.nodes[i].audio.muted) return false
+    return true
+  }
+
+  function setGroupVolume(g, v) {
+    for (var i = 0; g && i < g.nodes.length; i++)
+      if (g.nodes[i].audio) g.nodes[i].audio.volume = v
+  }
+
+  function toggleGroupMute(g) {
+    var mute = !groupMuted(g)
+    for (var i = 0; g && i < g.nodes.length; i++)
+      if (g.nodes[i].audio) g.nodes[i].audio.muted = mute
   }
 
   // Enter/Space: activate whatever the cursor is on.
@@ -361,10 +385,8 @@ Panel {
       if (src) setDefaultSource(src)
       return
     }
-    if (focusSection === "streams" && selectedIndex >= 0) {
-      var st = displayAudioStreams[selectedIndex]
-      if (st && st.audio) st.audio.muted = !st.audio.muted
-    }
+    if (focusSection === "streams" && selectedIndex >= 0)
+      toggleGroupMute(displayAudioStreams[selectedIndex])
   }
 
   onOpenedChanged: {
@@ -399,8 +421,28 @@ Panel {
     if (!opened) return
     displayAudioSinks = listSnapshot(audioSinks)
     displayAudioSources = listSnapshot(audioSources)
-    displayAudioStreams = listSnapshot(audioStreams)
+    var groups = Model.groupStreams(listSnapshot(audioStreams))
+    // Only replace when membership changed, so open sliders are not rebuilt mid-drag.
+    var sig = Model.groupsSignature(groups)
+    if (sig !== streamSignature) {
+      streamSignature = sig
+      displayAudioStreams = groups
+    }
     clampCursor()
+  }
+
+  property string streamSignature: ""
+  property var streamLabels: ({})
+
+  function refreshStreamLabels() {
+    var pids = []
+    for (var i = 0; i < audioStreams.length; i++) {
+      var pid = Model.streamPid(audioStreams[i])
+      if (pid && pids.indexOf(pid) < 0) pids.push(pid)
+    }
+    if (pids.length === 0 || streamLabelsProc.running) return
+    streamLabelsProc.command = ["sh", Qt.resolvedUrl("labels.sh").toString().replace("file://", "")].concat(pids)
+    streamLabelsProc.running = true
   }
 
   function scheduleDisplayAudioModelRefresh() {
@@ -413,6 +455,7 @@ Panel {
     displayAudioSinks = []
     displayAudioSources = []
     displayAudioStreams = []
+    streamSignature = ""
   }
 
   // Keep the keyboard-focused row inside the visible viewport of the
@@ -626,15 +669,22 @@ Panel {
     // Spotify exposes its PipeWire stream as "audio-src". For generic stream
     // names, use the one MPRIS player not already represented by another audio
     // stream (e.g. Chromium, or ALSA apps like cliamp).
-    return Model.unmatchedMprisStreamLabel(label, mprisPlayers, displayAudioStreams)
+    return Model.unmatchedMprisStreamLabel(label, mprisPlayers, displayStreamNodes())
   }
 
   function streamLabel(node) {
-    return Model.streamLabel(node, mprisPlayers, displayAudioStreams)
+    return Model.streamLabel(node, mprisPlayers, displayStreamNodes(), streamLabels)
   }
 
   function streamRepresentsPlayer(node, player) {
-    return Model.streamRepresentsPlayer(node, player, mprisPlayers, displayAudioStreams)
+    return Model.streamRepresentsPlayer(node, player, mprisPlayers, displayStreamNodes())
+  }
+
+  function displayStreamNodes() {
+    var list = []
+    for (var i = 0; i < displayAudioStreams.length; i++)
+      list = list.concat(displayAudioStreams[i].nodes)
+    return list
   }
 
   implicitWidth: button.implicitWidth
@@ -660,6 +710,17 @@ Panel {
   }
 
   Process {
+    id: streamLabelsProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.streamLabels = Model.parseStreamLabels(text)
+        root.refreshDisplayAudioModels()
+      }
+    }
+  }
+
+  Process {
     id: volumeSinkProc
     command: ["omarchy-audio-output-sink"]
     stdout: StdioCollector {
@@ -673,7 +734,10 @@ Panel {
     running: root.opened
     repeat: true
     triggeredOnStart: true
-    onTriggered: if (!sinkAvailabilityProc.running) sinkAvailabilityProc.running = true
+    onTriggered: {
+      if (!sinkAvailabilityProc.running) sinkAvailabilityProc.running = true
+      root.refreshStreamLabels()
+    }
   }
 
   // Runs whether or not the panel is open: the bar shows and scrolls the output
@@ -754,8 +818,7 @@ Panel {
           if (!root.cursorActive) return
           if (root.focusSection === "streams" && root.selectedIndex >= 0
               && root.selectedIndex < root.displayAudioStreams.length) {
-            var s = root.displayAudioStreams[root.selectedIndex]
-            if (s && s.audio) s.audio.muted = !s.audio.muted
+            root.toggleGroupMute(root.displayAudioStreams[root.selectedIndex])
           } else if (root.focusSection === "input") {
             root.toggleInputMute()
           } else {
@@ -1074,7 +1137,7 @@ Panel {
                 required property var modelData
                 required property int index
                 width: panelColumn.width
-                node: modelData
+                group: modelData
                 rowIndex: index
               }
             }
@@ -1216,12 +1279,15 @@ Panel {
   // sits on this row. Enter/Space mutes the stream.
   component StreamRow: CursorSurface {
     id: streamRow
-    required property var node
+    required property var group
     required property int rowIndex
 
-    readonly property real streamVolume: node && node.audio ? node.audio.volume : 0
-    readonly property bool streamMuted: node && node.audio ? node.audio.muted : false
-    readonly property bool isActive: root.streamRepresentsPlayer(node, root.activeMediaPlayer)
+    readonly property var node: group.nodes[0]
+    readonly property real streamVolume: root.groupVolume(group)
+    readonly property bool streamMuted: root.groupMuted(group)
+    readonly property bool isActive: group.nodes.some(function(n) {
+      return root.streamRepresentsPlayer(n, root.activeMediaPlayer)
+    })
 
     hasCursor: root.cursorActive && root.focusSection === "streams" && root.selectedIndex === rowIndex
     onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(streamRow)
@@ -1259,10 +1325,7 @@ Panel {
           MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: {
-              if (streamRow.node && streamRow.node.audio)
-                streamRow.node.audio.muted = !streamRow.node.audio.muted
-            }
+            onClicked: root.toggleGroupMute(streamRow.group)
           }
         }
 
@@ -1302,13 +1365,8 @@ Panel {
         value: streamRow.streamVolume
         opacity: streamRow.streamMuted ? 0.5 : 1.0
 
-        onMoved: function(v) {
-          if (streamRow.node && streamRow.node.audio) streamRow.node.audio.volume = v
-        }
-        onRightClicked: {
-          if (streamRow.node && streamRow.node.audio)
-            streamRow.node.audio.muted = !streamRow.node.audio.muted
-        }
+        onMoved: function(v) { root.setGroupVolume(streamRow.group, v) }
+        onRightClicked: root.toggleGroupMute(streamRow.group)
       }
     }
 

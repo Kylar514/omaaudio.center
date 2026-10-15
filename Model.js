@@ -215,12 +215,52 @@ function unmatchedMprisStreamLabel(label, players, streams) {
   })
 }
 
-function streamLabel(node, players, streams) {
+function streamPid(node) {
+  var pid = nodeProps(node)["application.process.id"]
+  return pid ? String(pid) : ""
+}
+
+// Streams from one process (e.g. all of Teams' audio elements) share a row.
+function groupStreams(nodes) {
+  var groups = []
+  var byKey = {}
+  for (var i = 0; i < nodes.length; i++) {
+    var key = streamPid(nodes[i]) || "n" + nodes[i].id
+    if (!byKey[key]) {
+      byKey[key] = { key: key, nodes: [] }
+      groups.push(byKey[key])
+    }
+    byKey[key].nodes.push(nodes[i])
+  }
+  return groups
+}
+
+function groupsSignature(groups) {
+  return groups.map(function(g) {
+    return g.key + ":" + g.nodes.map(function(n) { return n.id }).join(",")
+  }).join("|")
+}
+
+// labels.sh output: "pid<TAB>Label" replaces the name, "pid<TAB>+dir" appends " · dir".
+function parseStreamLabels(raw) {
+  var next = {}
+  var lines = String(raw || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var parts = lines[i].split("\t")
+    if (parts.length >= 2 && parts[0] && parts[1]) next[parts[0]] = parts[1]
+  }
+  return next
+}
+
+function streamLabel(node, players, streams, labels) {
   if (!node) return "Stream"
   var label = rawStreamLabel(node)
-  return friendlyStreamLabel(matchingMprisStreamLabel(label, players)
+  var base = friendlyStreamLabel(matchingMprisStreamLabel(label, players)
     || unmatchedMprisStreamLabel(label, players, streams)
     || label) || "Stream"
+  var extra = labels ? labels[streamPid(node)] : ""
+  if (!extra) return base
+  return extra.charAt(0) === "+" ? base + " · " + extra.slice(1) : extra
 }
 
 function streamRepresentsPlayer(node, player, players, streams) {
@@ -256,6 +296,10 @@ if (typeof module !== "undefined") {
     mprisLabelsFor: mprisLabelsFor,
     matchingMprisStreamLabel: matchingMprisStreamLabel,
     unmatchedMprisStreamLabel: unmatchedMprisStreamLabel,
+    streamPid: streamPid,
+    groupStreams: groupStreams,
+    groupsSignature: groupsSignature,
+    parseStreamLabels: parseStreamLabels,
     streamLabel: streamLabel,
     streamRepresentsPlayer: streamRepresentsPlayer
   }
