@@ -108,6 +108,9 @@ Panel {
   property var displayAudioSinks: []
   property var displayAudioSources: []
   property var displayAudioStreams: []
+  // Binding tracks ready/properties changes as well as node membership.
+  readonly property var streamGroups: Model.groupStreams(audioStreams)
+  onStreamGroupsChanged: scheduleDisplayAudioModelRefresh()
 
   // A DSP sink -- a speaker tuning, or EasyEffects -- can be the selected output
   // without being where loudness lives: changing its volume alters the level going
@@ -421,27 +424,38 @@ Panel {
     if (!opened) return
     displayAudioSinks = listSnapshot(audioSinks)
     displayAudioSources = listSnapshot(audioSources)
-    var groups = Model.groupStreams(listSnapshot(audioStreams))
+    var groups = streamGroups
     // Only replace when membership changed, so open sliders are not rebuilt mid-drag.
     var sig = Model.groupsSignature(groups)
     if (sig !== streamSignature) {
       streamSignature = sig
       displayAudioStreams = groups
+      refreshStreamLabels()
     }
     clampCursor()
   }
 
   property string streamSignature: ""
   property var streamLabels: ({})
+  property bool streamLabelsPending: false
 
   function refreshStreamLabels() {
+    if (!opened) return
     var pids = []
     for (var i = 0; i < audioStreams.length; i++) {
       var pid = Model.streamPid(audioStreams[i])
       if (pid && pids.indexOf(pid) < 0) pids.push(pid)
     }
-    if (pids.length === 0 || streamLabelsProc.running) return
-    streamLabelsProc.command = ["sh", Qt.resolvedUrl("labels.sh").toString().replace("file://", "")].concat(pids)
+    if (streamLabelsProc.running) {
+      streamLabelsPending = true
+      return
+    }
+    streamLabelsPending = false
+    if (pids.length === 0) {
+      streamLabels = ({})
+      return
+    }
+    streamLabelsProc.command = ["sh", decodeURIComponent(Qt.resolvedUrl("labels.sh").toString().replace("file://", ""))].concat(pids)
     streamLabelsProc.running = true
   }
 
@@ -711,6 +725,10 @@ Panel {
 
   Process {
     id: streamLabelsProc
+    onRunningChanged: {
+      if (!running && root.streamLabelsPending)
+        Qt.callLater(root.refreshStreamLabels)
+    }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
